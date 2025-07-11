@@ -12,7 +12,7 @@ fan_inB = PWM(Pin(18), freq=10000)
 button_left = Pin(16, Pin.IN, Pin.PULL_UP)
 button_right = Pin(27, Pin.IN, Pin.PULL_UP)
 
-motion_sensor = Pin(23, Pin.IN)
+motion_sensor = Pin(14, Pin.IN)
 
 # === DHT Sensor ===
 sensor = dht.DHT11(Pin(17))
@@ -29,9 +29,7 @@ fan_on = False
 last_left = 1
 last_right = 1
 last_lcd_update = 0
-motion_detected = False
-motion_last_time = 0
-MOTION_DISPLAY_TIME = 3000  # milliseconds to show "Yes" after motion
+last_motion_state = -1
 
 # === Helper functions ===
 def toggle_led():
@@ -49,32 +47,11 @@ def toggle_fan():
         fan_inA.duty(0)
         fan_inB.duty(0)
 
-def update_lcd():
-    global motion_detected, motion_last_time
-    try:
-        sensor.measure()
-        t = sensor.temperature()
-        h = sensor.humidity()
-
-        # Check for motion
-        if motion_sensor.value() == 1:
-            motion_detected = True
-            motion_last_time = time.ticks_ms()
-
-        # Clear motion after timeout
-        if motion_detected and time.ticks_diff(time.ticks_ms(), motion_last_time) > MOTION_DISPLAY_TIME:
-            motion_detected = False
-
-        # Update display
-        lcd.move_to(0, 0)
-        lcd.putstr("Temp: {:>2}C Hum:{:>2}%".format(t, h))
-        lcd.move_to(0, 1)
-        lcd.putstr("Motion: " + ("Yes " if motion_detected else "No  "))
-    except Exception:
-        lcd.move_to(0, 0)
-        lcd.putstr("Sensor Error     ")
-        lcd.move_to(0, 1)
-        lcd.putstr("                ")
+def update_lcd(temp, hum, motion):
+    lcd.move_to(0, 0)
+    lcd.putstr("Temp: {:>2}C Hum:{:>2}%".format(temp, hum))
+    lcd.move_to(0, 1)
+    lcd.putstr("Motion: " + ("Yes " if motion else "No  "))
 
 # === Main loop ===
 while True:
@@ -90,10 +67,21 @@ while True:
         time.sleep(0.2)
     last_right = button_right.value()
 
-    # Update LCD every 2 seconds or on motion
-    now = time.ticks_ms()
-    if time.ticks_diff(now, last_lcd_update) > 2000 or motion_sensor.value() == 1:
-        update_lcd()
-        last_lcd_update = now
+    # Read sensors
+    motion_now = motion_sensor.value()
+    try:
+        sensor.measure()
+        temperature = sensor.temperature()
+        humidity = sensor.humidity()
+    except Exception:
+        temperature = 0
+        humidity = 0
 
-    time.sleep(0.01)
+    # Only update LCD if motion state or 2s interval
+    now = time.ticks_ms()
+    if (motion_now != last_motion_state) or (time.ticks_diff(now, last_lcd_update) > 2000):
+        update_lcd(temperature, humidity, motion_now)
+        last_lcd_update = now
+        last_motion_state = motion_now
+
+    time.sleep(0.05)
