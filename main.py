@@ -13,6 +13,7 @@ button_left = Pin(16, Pin.IN, Pin.PULL_UP)
 button_right = Pin(27, Pin.IN, Pin.PULL_UP)
 
 motion_sensor = Pin(14, Pin.IN)
+buzzer = PWM(Pin(25))
 
 # === DHT Sensor ===
 sensor = dht.DHT11(Pin(17))
@@ -53,6 +54,12 @@ def update_lcd(temp, hum, motion):
     lcd.move_to(0, 1)
     lcd.putstr("Motion: " + ("Yes " if motion else "No  "))
 
+def make_sound():
+    buzzer.freq(100)       # Very low frequency (deep)
+    buzzer.duty(50)        # Very low volume (duty out of 1023)
+    time.sleep(0.02)       # Very short duration (20ms)
+    buzzer.duty(0)
+
 # === Main loop ===
 while True:
     # Toggle LED
@@ -67,8 +74,14 @@ while True:
         time.sleep(0.2)
     last_right = button_right.value()
 
-    # Read sensors
+    # Read motion
     motion_now = motion_sensor.value()
+
+    # Play F1 radio beep on new motion
+    if motion_now == 1 and last_motion_state == 0:
+        make_sound()
+
+    # Read temp and humidity
     try:
         sensor.measure()
         temperature = sensor.temperature()
@@ -77,11 +90,12 @@ while True:
         temperature = 0
         humidity = 0
 
-    # Only update LCD if motion state or 2s interval
+    # Update LCD on motion change or every 2s
     now = time.ticks_ms()
-    if (motion_now != last_motion_state) or (time.ticks_diff(now, last_lcd_update) > 2000):
+    if motion_now != last_motion_state or time.ticks_diff(now, last_lcd_update) > 2000:
         update_lcd(temperature, humidity, motion_now)
         last_lcd_update = now
         last_motion_state = motion_now
 
     time.sleep(0.05)
+
