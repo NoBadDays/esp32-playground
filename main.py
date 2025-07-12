@@ -2,6 +2,7 @@ from machine import Pin, PWM, SoftI2C
 import time
 import dht
 from i2c_lcd import I2cLcd
+import sys
 
 # === Setup pins ===
 led = Pin(12, Pin.OUT)
@@ -13,6 +14,7 @@ button_left = Pin(16, Pin.IN, Pin.PULL_UP)
 button_right = Pin(27, Pin.IN, Pin.PULL_UP)
 
 motion_sensor = Pin(14, Pin.IN)
+gas_sensor = Pin(23, Pin.IN)
 buzzer = PWM(Pin(25))
 
 # === DHT Sensor ===
@@ -27,10 +29,15 @@ lcd.backlight_on()
 # === States ===
 led_on = False
 fan_on = False
+fan_auto = False
 last_left = 1
 last_right = 1
 last_lcd_update = 0
 last_motion_state = -1
+last_gas_state = -1
+gas_clear_time = None
+gas_alert_active = False
+last_state_line = ""
 
 # === Helper functions ===
 def toggle_led():
@@ -38,9 +45,13 @@ def toggle_led():
     led_on = not led_on
     led.value(1 if led_on else 0)
 
-def toggle_fan():
+def toggle_fan(on=None):
     global fan_on
-    fan_on = not fan_on
+    if on is None:
+        fan_on = not fan_on
+    else:
+        fan_on = on
+
     if fan_on:
         fan_inA.duty(700)
         fan_inB.duty(0)
@@ -54,11 +65,31 @@ def update_lcd(temp, hum, motion):
     lcd.move_to(0, 1)
     lcd.putstr("Motion: " + ("Yes " if motion else "No  "))
 
-def make_sound():
-    buzzer.freq(100)       # Very low frequency (deep)
-    buzzer.duty(50)        # Very low volume (duty out of 1023)
-    time.sleep(0.02)       # Very short duration (20ms)
+def show_gas_alert():
+    lcd.move_to(0, 1)
+    lcd.putstr("!! GAS ALERT !! ")
+
+def f1_radio_beep():
+    buzzer.duty(512)
+    tones = [659, 523, 659, 784]
+    for freq in tones:
+        buzzer.freq(freq)
+        time.sleep(0.15)
     buzzer.duty(0)
+
+def print_state_line():
+    global last_state_line
+    motion = "Yes" if motion_sensor.value() else "No"
+    gas = "Yes" if not gas_sensor.value() else "No"  # flipped logic
+    fan = "On" if fan_on else "Off"
+    led = "On" if led_on else "Off"
+    fan_mode = "Auto" if fan_auto else "Manual"
+
+    line = f"Motion: {motion} | Gas: {gas} | Fan: {fan} ({fan_mode}) | LED: {led}"
+
+    if line != last_state_line:
+        print("\r" + line + " " * 10, end="")  # overwrite line
+        last_state_line = line
 
 # === Main loop ===
 while True:
@@ -68,20 +99,18 @@ while True:
         time.sleep(0.2)
     last_left = button_left.value()
 
-    # Toggle Fan
+    # Toggle Fan manually
     if button_right.value() == 0 and last_right == 1:
         toggle_fan()
+        fan_auto = False
         time.sleep(0.2)
     last_right = button_right.value()
 
     # Read motion
     motion_now = motion_sensor.value()
+    last_motion_state = motion_now
 
-    # Play F1 radio beep on new motion
-    if motion_now == 1 and last_motion_state == 0:
-        make_sound()
-
-    # Read temp and humidity
+    # Read DHT
     try:
         sensor.measure()
         temperature = sensor.temperature()
@@ -90,12 +119,36 @@ while True:
         temperature = 0
         humidity = 0
 
-    # Update LCD on motion change or every 2s
+    # === GAS detection ===
+    gas_now = gas_sensor.value()
+
+    if gas_now == 0 and last_gas_state == 1:  # 0 = gas detected
+        f1_radio_beep()
+        show_gas_alert()
+        toggle_fan(on=True)
+        fan_auto = True
+        gas_alert_active = True
+        gas_clear_time = None
+
+    elif gas_now == 1 and last_gas_state == 0:  # 1 = air clean again
+        gas_clear_time = time.ticks_ms()
+
+    if gas_alert_active and gas_clear_time:
+        if time.ticks_diff(time.ticks_ms(), gas_clear_time) > 3000:
+            gas_alert_active = False
+            update_lcd(temperature, humidity, motion_now)
+            if fan_auto:
+                toggle_fan(on=False)
+                fan_auto = False
+            gas_clear_time = None
+
+    last_gas_state = gas_now
+
+    # LCD update
     now = time.ticks_ms()
-    if motion_now != last_motion_state or time.ticks_diff(now, last_lcd_update) > 2000:
+    if not gas_alert_active and time.ticks_diff(now, last_lcd_update) > 2000:
         update_lcd(temperature, humidity, motion_now)
         last_lcd_update = now
-        last_motion_state = motion_now
 
+    print_state_line()
     time.sleep(0.05)
-
