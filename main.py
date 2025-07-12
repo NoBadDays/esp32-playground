@@ -4,6 +4,11 @@ import dht
 from i2c_lcd import I2cLcd
 import sys
 
+# === CONFIG ===
+GAS_ALERT_DURATION_MS = 7000        # How long to keep fan + alert on after gas clears
+FAN_DUTY = 500                      # Speed of fan (The range of duty cycle is 0-1023)
+BEEP_TONE = [659, 523, 659, 784]    # F1 beep pattern
+
 # === Setup pins ===
 led = Pin(12, Pin.OUT)
 
@@ -53,7 +58,7 @@ def toggle_fan(on=None):
         fan_on = on
 
     if fan_on:
-        fan_inA.duty(700)
+        fan_inA.duty(FAN_DUTY)
         fan_inB.duty(0)
     else:
         fan_inA.duty(0)
@@ -71,8 +76,7 @@ def show_gas_alert():
 
 def f1_radio_beep():
     buzzer.duty(512)
-    tones = [659, 523, 659, 784]
-    for freq in tones:
+    for freq in BEEP_TONE:
         buzzer.freq(freq)
         time.sleep(0.15)
     buzzer.duty(0)
@@ -134,7 +138,7 @@ while True:
         gas_clear_time = time.ticks_ms()
 
     if gas_alert_active and gas_clear_time:
-        if time.ticks_diff(time.ticks_ms(), gas_clear_time) > 3000:
+        if time.ticks_diff(time.ticks_ms(), gas_clear_time) > GAS_ALERT_DURATION_MS:
             gas_alert_active = False
             update_lcd(temperature, humidity, motion_now)
             if fan_auto:
