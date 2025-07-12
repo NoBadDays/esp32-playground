@@ -1,13 +1,15 @@
 from machine import Pin, PWM, SoftI2C
+import neopixel
 import time
 import dht
 from i2c_lcd import I2cLcd
 import sys
 
 # === CONFIG ===
-GAS_ALERT_DURATION_MS = 7000        # How long to keep fan + alert on after gas clears
-FAN_DUTY = 500                      # Speed of fan (The range of duty cycle is 0-1023)
-BEEP_TONE = [659, 523, 659, 784]    # F1 beep pattern
+GAS_ALERT_DURATION_MS = 7000              # How long to keep fan + alert on after gas clears
+FAN_DUTY = 500                            # Speed of fan (0-1023)
+BEEP_TONE = [659, 523, 659, 784]          # F1 beep pattern
+RGB_BRIGHTNESS = 100
 
 # === Setup pins ===
 led = Pin(12, Pin.OUT)
@@ -21,6 +23,21 @@ button_right = Pin(27, Pin.IN, Pin.PULL_UP)
 motion_sensor = Pin(14, Pin.IN)
 gas_sensor = Pin(23, Pin.IN)
 buzzer = PWM(Pin(25))
+
+rgb_led = neopixel.NeoPixel(Pin(26, Pin.OUT), 4)
+
+# === RGB LED Setup ===
+def set_rgb(color):
+    for i in range(RGB_COUNT):
+        rgb_led[i] = color
+    rgb_led.write()
+
+def flash_rgb_alert():
+    now = time.ticks_ms()
+    if (now // 300) % 2 == 0:
+        set_rgb((RGB_BRIGHTNESS, 0, 0))        # Red
+    else:
+        set_rgb((RGB_BRIGHTNESS, 50, 0))       # Orange
 
 # === DHT Sensor ===
 sensor = dht.DHT11(Pin(17))
@@ -141,6 +158,7 @@ while True:
         if time.ticks_diff(time.ticks_ms(), gas_clear_time) > GAS_ALERT_DURATION_MS:
             gas_alert_active = False
             update_lcd(temperature, humidity, motion_now)
+            set_rgb((0, 0, 0))  # turn off RGB
             if fan_auto:
                 toggle_fan(on=False)
                 fan_auto = False
@@ -154,5 +172,12 @@ while True:
         update_lcd(temperature, humidity, motion_now)
         last_lcd_update = now
 
+    # RGB Flashing during gas alert
+    if gas_alert_active:
+        flash_rgb_alert()
+    else:
+        set_rgb((0, 0, 0))
+
     print_state_line()
     time.sleep(0.05)
+
